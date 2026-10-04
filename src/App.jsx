@@ -10,6 +10,7 @@ import AIAssistantModal from './components/AIAssistantModal';
 
 import { ASSETS, generateHistoricalCandles, generateNextTick } from './utils/marketData';
 import { analyzeSignals } from './utils/strategyEngine';
+import { sendN8nWebhook } from './utils/n8nWebhook';
 import confetti from 'canvas-confetti';
 
 export default function App() {
@@ -18,6 +19,9 @@ export default function App() {
   const [currency, setCurrency] = useState('$');
   const [balance, setBalance] = useState(100000);
   const [isLiveStreaming, setIsLiveStreaming] = useState(true);
+
+  // n8n Webhook URL
+  const [n8nWebhookUrl, setN8nWebhookUrl] = useState(() => localStorage.getItem('n8n_webhook_url') || '');
 
   // Strategy & Signal state
   const [strategyId, setStrategyId] = useState('ema_rsi');
@@ -49,6 +53,20 @@ export default function App() {
       const { activeSignal: sig, signalHistory: history } = analyzeSignals(candles, strategyId, customParams);
       setActiveSignal(sig);
       setSignalHistory(history);
+
+      // Trigger n8n Webhook for Telegram Alert when a new active signal appears
+      if (sig && n8nWebhookUrl) {
+        sendN8nWebhook(n8nWebhookUrl, 'SIGNAL_ALERT', {
+          asset: selectedAsset.name,
+          symbol: selectedAsset.id,
+          type: sig.type,
+          entryPrice: sig.entryPrice,
+          stopLoss: sig.stopLoss,
+          takeProfit: sig.takeProfit,
+          confidence: `${sig.confidence}%`,
+          reason: sig.reason
+        });
+      }
     }
   }, [candles, strategyId, customParams]);
 
@@ -112,7 +130,7 @@ export default function App() {
                 }
 
                 setBalance(b => b + pnlAmount);
-                setTradeHistory(th => [{
+                const historyItem = {
                   id: `th_${Date.now()}_${Math.random()}`,
                   assetId: pos.assetId,
                   type: pos.type,
@@ -122,7 +140,14 @@ export default function App() {
                   pnlAmount: parseFloat(pnlAmount.toFixed(2)),
                   pnlPct: parseFloat(pnlPct.toFixed(2)),
                   time: Date.now()
-                }, ...th]);
+                };
+
+                setTradeHistory(th => [historyItem, ...th]);
+
+                // Trigger n8n Webhook for Trello Trading Journal Logging
+                if (n8nWebhookUrl) {
+                  sendN8nWebhook(n8nWebhookUrl, 'TRADE_CLOSED', historyItem);
+                }
 
               } else {
                 remainingPos.push(pos);
@@ -139,7 +164,7 @@ export default function App() {
     }, 1200);
 
     return () => clearInterval(timer);
-  }, [isLiveStreaming, selectedAsset.id, timeframe, candles.length]);
+  }, [isLiveStreaming, selectedAsset.id, timeframe, candles.length, n8nWebhookUrl]);
 
   // Execute Signal Paper Trade
   const handleExecuteTrade = (signal) => {
@@ -155,6 +180,10 @@ export default function App() {
       time: Date.now()
     };
     setPositions([newPos, ...positions]);
+
+    if (n8nWebhookUrl) {
+      sendN8nWebhook(n8nWebhookUrl, 'TRADE_EXECUTED', newPos);
+    }
   };
 
   // Instant Quick Market Trade from Chart Header
@@ -175,6 +204,10 @@ export default function App() {
       time: Date.now()
     };
     setPositions([newPos, ...positions]);
+
+    if (n8nWebhookUrl) {
+      sendN8nWebhook(n8nWebhookUrl, 'TRADE_EXECUTED', newPos);
+    }
   };
 
   // Execute Trade from Risk Calculator Modal
@@ -191,6 +224,10 @@ export default function App() {
       time: Date.now()
     };
     setPositions([newPos, ...positions]);
+
+    if (n8nWebhookUrl) {
+      sendN8nWebhook(n8nWebhookUrl, 'TRADE_EXECUTED', newPos);
+    }
   };
 
   // Close Position Manually
@@ -220,6 +257,11 @@ export default function App() {
     };
 
     setTradeHistory([historyItem, ...tradeHistory]);
+
+    if (n8nWebhookUrl) {
+      sendN8nWebhook(n8nWebhookUrl, 'TRADE_CLOSED', historyItem);
+    }
+
     return historyItem;
   };
 
@@ -239,6 +281,8 @@ export default function App() {
         onOpenRiskCalc={() => setIsRiskCalcOpen(true)}
         isLiveStreaming={isLiveStreaming}
         toggleLiveStreaming={() => setIsLiveStreaming(!isLiveStreaming)}
+        n8nWebhookUrl={n8nWebhookUrl}
+        setN8nWebhookUrl={setN8nWebhookUrl}
       />
 
       {/* Main Trading Terminal Layout */}
