@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, Flame, TrendingUp, TrendingDown, Layers } from 'lucide-react';
+import { Search, Flame, TrendingUp, TrendingDown, PlusCircle } from 'lucide-react';
 import { ASSETS, formatPrice } from '../utils/marketData';
 
 function MiniSparkline({ isPositive }) {
@@ -39,12 +39,12 @@ function MiniSparkline({ isPositive }) {
 export default function Watchlist({ selectedAsset, onSelectAsset, currency }) {
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('ALL');
+  const [assetList, setAssetList] = useState(ASSETS);
   const [assetPrices, setAssetPrices] = useState({});
 
   useEffect(() => {
-    // Initial random prices & 24h change
     const initialMap = {};
-    ASSETS.forEach(a => {
+    assetList.forEach(a => {
       const change = parseFloat(((Math.random() - 0.48) * 4).toFixed(2));
       const mult = currency === '₹' && a.currency === '$' ? 84 : currency === '$' && a.currency === '₹' ? 1/84 : 1;
       initialMap[a.id] = {
@@ -55,11 +55,10 @@ export default function Watchlist({ selectedAsset, onSelectAsset, currency }) {
     });
     setAssetPrices(initialMap);
 
-    // Live tick simulator for watchlist items
     const interval = setInterval(() => {
       setAssetPrices(prev => {
         const next = { ...prev };
-        ASSETS.forEach(a => {
+        assetList.forEach(a => {
           if (next[a.id]) {
             const deltaPct = (Math.random() - 0.495) * 0.003;
             const newPrice = next[a.id].price * (1 + deltaPct);
@@ -74,9 +73,31 @@ export default function Watchlist({ selectedAsset, onSelectAsset, currency }) {
     }, 1500);
 
     return () => clearInterval(interval);
-  }, [currency]);
+  }, [currency, assetList]);
 
-  const filteredAssets = ASSETS.filter(a => {
+  const handleAddCustomSymbol = () => {
+    if (!search.trim()) return;
+    const cleanId = search.trim().toUpperCase();
+    if (assetList.some(a => a.id === cleanId)) return;
+
+    const isCrypto = cleanId.endsWith('USDT') || cleanId === 'BTC' || cleanId === 'ETH' || cleanId === 'SOL';
+    const newAsset = {
+      id: cleanId,
+      name: cleanId,
+      category: isCrypto ? 'Crypto' : 'Indian Stock',
+      basePrice: isCrypto ? 100 : 500,
+      volatility: 0.01,
+      currency: isCrypto ? '$' : '₹',
+      step: 1
+    };
+
+    const updated = [newAsset, ...assetList];
+    setAssetList(updated);
+    onSelectAsset(newAsset);
+    setSearch('');
+  };
+
+  const filteredAssets = assetList.filter(a => {
     const matchesSearch = a.name.toLowerCase().includes(search.toLowerCase()) || a.id.toLowerCase().includes(search.toLowerCase());
     const matchesFilter = filter === 'ALL' || (filter === 'CRYPTO' && a.category === 'Crypto') || (filter === 'STOCKS' && a.category !== 'Crypto');
     return matchesSearch && matchesFilter;
@@ -89,7 +110,7 @@ export default function Watchlist({ selectedAsset, onSelectAsset, currency }) {
           <Flame size={18} color="#f59e0b" />
           <h3 style={{ fontSize: '0.95rem', fontWeight: 700, color: '#fff' }}>Market Watch</h3>
         </div>
-        <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{ASSETS.length} Assets</span>
+        <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{assetList.length} Assets</span>
       </div>
 
       {/* Search Input */}
@@ -97,7 +118,7 @@ export default function Watchlist({ selectedAsset, onSelectAsset, currency }) {
         <Search size={14} color="var(--text-muted)" style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)' }} />
         <input 
           type="text"
-          placeholder="Search BTC, NIFTY..."
+          placeholder="Search TATA, TSLA, BTC..."
           value={search}
           onChange={e => setSearch(e.target.value)}
           style={{
@@ -126,6 +147,17 @@ export default function Watchlist({ selectedAsset, onSelectAsset, currency }) {
           </button>
         ))}
       </div>
+
+      {/* Add Custom Symbol Button if search doesn't match */}
+      {search.trim() !== '' && filteredAssets.length === 0 && (
+        <button
+          onClick={handleAddCustomSymbol}
+          className="btn-bullish"
+          style={{ padding: '8px 12px', fontSize: '0.75rem', justifyContent: 'center' }}
+        >
+          <PlusCircle size={14} /> Add "{search.toUpperCase()}" to Watchlist
+        </button>
+      )}
 
       {/* Asset List */}
       <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px', paddingRight: '4px' }}>
@@ -163,7 +195,7 @@ export default function Watchlist({ selectedAsset, onSelectAsset, currency }) {
               <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
                 <MiniSparkline isPositive={info.isPositive} />
                 <div className="font-mono" style={{ fontSize: '0.82rem', fontWeight: 600, color: '#fff' }}>
-                  {formatPrice(info.price, currSymbol)}
+                  {formatPrice(info.price, currSymbol, asset.currency)}
                 </div>
                 <div style={{ fontSize: '0.7rem', fontWeight: 600, color: info.isPositive ? 'var(--bullish)' : 'var(--bearish)', display: 'flex', alignItems: 'center', gap: '2px' }}>
                   {info.isPositive ? <TrendingUp size={10} /> : <TrendingDown size={10} />}

@@ -1,18 +1,33 @@
 // Real Live Stock Market Feed Adapter (Indian Equities + US Tech Stocks)
 
 /**
- * Yahoo Finance Symbol Map for Live Stock Data
+ * Yahoo Finance Universal Symbol Map for Real Stock Data
  */
 const STOCK_SYMBOL_MAP = {
-  'NIFTY50': '^NSEI',      // NIFTY 50 Index
-  'RELIANCE': 'RELIANCE.NS', // Reliance Industries (NSE)
-  'NVDA': 'NVDA',          // NVIDIA Corp (NASDAQ)
-  'AAPL': 'AAPL',          // Apple Inc. (NASDAQ)
+  // Indian Indexes & Equities (NSE)
+  'NIFTY50': '^NSEI',
+  'BANKNIFTY': '^NSEBANK',
+  'RELIANCE': 'RELIANCE.NS',
+  'TATAMOTORS': 'TATAMOTORS.NS',
+  'TATASTEEL': 'TATASTEEL.NS',
+  'HDFCBANK': 'HDFCBANK.NS',
+  'INFY': 'INFY.NS',
+  'ICICIBANK': 'ICICIBANK.NS',
+  'SBIN': 'SBIN.NS',
+  'TCS': 'TCS.NS',
+  'ZOMATO': 'ZOMATO.NS',
+
+  // US Tech Stocks (NASDAQ / NYSE)
+  'NVDA': 'NVDA',
+  'AAPL': 'AAPL',
+  'TSLA': 'TSLA',
+  'MSFT': 'MSFT',
+  'GOOGL': 'GOOGL',
+  'AMZN': 'AMZN',
+  'META': 'META',
+  'AMD': 'AMD',
 };
 
-/**
- * Maps dashboard timeframe ID to Yahoo Finance interval parameters
- */
 const TIMEFRAME_MAP_STOCK = {
   '1m': { range: '1d', interval: '1m' },
   '5m': { range: '5d', interval: '5m' },
@@ -22,13 +37,17 @@ const TIMEFRAME_MAP_STOCK = {
 };
 
 /**
- * Fetches 100% REAL Stock Market candles for NIFTY 50, Reliance, NVDA, AAPL from Live Data API
+ * Fetches 100% REAL Stock Market candles from Yahoo Finance Live Data API
  */
 export async function fetchRealStockCandles(assetId = 'RELIANCE', timeframeId = '15m') {
-  const symbol = STOCK_SYMBOL_MAP[assetId] || assetId;
+  // Dynamically resolve symbol (if not in map, try adding .NS for Indian or raw symbol for US)
+  let symbol = STOCK_SYMBOL_MAP[assetId];
+  if (!symbol) {
+    symbol = assetId.includes('.') ? assetId : `${assetId}.NS`;
+  }
+
   const config = TIMEFRAME_MAP_STOCK[timeframeId] || TIMEFRAME_MAP_STOCK['15m'];
 
-  // Using public Yahoo Finance / AllOrigins CORS Proxy endpoint for real stock data
   const targetUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=${config.range}&interval=${config.interval}`;
   const corsProxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`;
 
@@ -68,7 +87,7 @@ export async function fetchRealStockCandles(assetId = 'RELIANCE', timeframeId = 
       }
     }
   } catch (err) {
-    console.warn(`[Real Stock Feed ⚠️] Stock API fetch failed for ${assetId}, using fallback:`, err);
+    console.warn(`[Real Stock Feed ⚠️] Stock API fetch failed for ${assetId}:`, err);
   }
 
   return null;
