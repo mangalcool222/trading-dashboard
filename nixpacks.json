@@ -1,0 +1,18 @@
+{
+  "providers": ["node"],
+  "buildImage": "ghcr.io/railwayapp/nixpacks:ubuntu-1745885067",
+  "phases": {
+    "setup": {
+      "nixPkgs": ["nodejs_20"]
+    },
+    "install": {
+      "cmd": "npm install"
+    },
+    "build": {
+      "cmd": "npm run build"
+    }
+  },
+  "start": {
+    "cmd": "npx caddy run --config /assets/Caddyfile --adapter caddyfile"
+  }
+}
