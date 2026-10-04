@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, Flame, TrendingUp, TrendingDown, PlusCircle } from 'lucide-react';
+import { Search, Flame, TrendingUp, TrendingDown, Plus, Trash2 } from 'lucide-react';
 import { ASSETS, formatPrice } from '../utils/marketData';
+import AddSymbolModal from './AddSymbolModal';
 
 function MiniSparkline({ isPositive }) {
   const canvasRef = useRef(null);
@@ -15,40 +16,46 @@ function MiniSparkline({ isPositive }) {
     ctx.clearRect(0, 0, width, height);
     ctx.beginPath();
 
-    const points = 12;
+    const points = 10;
     const strokeColor = isPositive ? '#00f094' : '#ff3b69';
     let prevY = height / 2;
 
     ctx.moveTo(0, prevY);
     for (let i = 1; i <= points; i++) {
       const x = (i / points) * width;
-      const change = (Math.random() - (isPositive ? 0.45 : 0.55)) * 12;
-      const y = Math.max(4, Math.min(height - 4, prevY + change));
+      const change = (Math.random() - (isPositive ? 0.45 : 0.55)) * 10;
+      const y = Math.max(3, Math.min(height - 3, prevY + change));
       ctx.lineTo(x, y);
       prevY = y;
     }
 
     ctx.strokeStyle = strokeColor;
-    ctx.lineWidth = 1.5;
+    ctx.lineWidth = 1.2;
     ctx.stroke();
   }, [isPositive]);
 
-  return <canvas ref={canvasRef} width={60} height={24} style={{ display: 'block' }} />;
+  return <canvas ref={canvasRef} width={50} height={20} style={{ display: 'block' }} />;
 }
 
 export default function Watchlist({ selectedAsset, onSelectAsset, currency }) {
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('ALL');
-  const [assetList, setAssetList] = useState(ASSETS);
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+
+  // User's active watchlist symbol IDs (default 7 core assets)
+  const [watchlistIds, setWatchlistIds] = useState([
+    'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'NIFTY50', 'RELIANCE', 'NVDA', 'AAPL'
+  ]);
+
   const [assetPrices, setAssetPrices] = useState({});
 
+  // Live simulation tick updates for active watchlist items
   useEffect(() => {
     const initialMap = {};
-    assetList.forEach(a => {
+    ASSETS.forEach(a => {
       const change = parseFloat(((Math.random() - 0.48) * 4).toFixed(2));
-      const mult = currency === '₹' && a.currency === '$' ? 84 : currency === '$' && a.currency === '₹' ? 1/84 : 1;
       initialMap[a.id] = {
-        price: a.basePrice * mult,
+        price: a.basePrice,
         change,
         isPositive: change >= 0
       };
@@ -58,7 +65,7 @@ export default function Watchlist({ selectedAsset, onSelectAsset, currency }) {
     const interval = setInterval(() => {
       setAssetPrices(prev => {
         const next = { ...prev };
-        assetList.forEach(a => {
+        ASSETS.forEach(a => {
           if (next[a.id]) {
             const deltaPct = (Math.random() - 0.495) * 0.003;
             const newPrice = next[a.id].price * (1 + deltaPct);
@@ -73,139 +80,139 @@ export default function Watchlist({ selectedAsset, onSelectAsset, currency }) {
     }, 1500);
 
     return () => clearInterval(interval);
-  }, [currency, assetList]);
+  }, []);
 
-  const handleAddCustomSymbol = () => {
-    if (!search.trim()) return;
-    const cleanId = search.trim().toUpperCase();
-    if (assetList.some(a => a.id === cleanId)) return;
-
-    const isCrypto = cleanId.endsWith('USDT') || cleanId === 'BTC' || cleanId === 'ETH' || cleanId === 'SOL';
-    const newAsset = {
-      id: cleanId,
-      name: cleanId,
-      category: isCrypto ? 'Crypto' : 'Indian Stock',
-      basePrice: isCrypto ? 100 : 500,
-      volatility: 0.01,
-      currency: isCrypto ? '$' : '₹',
-      step: 1
-    };
-
-    const updated = [newAsset, ...assetList];
-    setAssetList(updated);
-    onSelectAsset(newAsset);
-    setSearch('');
+  const handleToggleSymbol = (symbolId) => {
+    if (watchlistIds.includes(symbolId)) {
+      setWatchlistIds(watchlistIds.filter(id => id !== symbolId));
+    } else {
+      setWatchlistIds([...watchlistIds, symbolId]);
+    }
   };
 
-  const filteredAssets = assetList.filter(a => {
+  const activeWatchlistAssets = ASSETS.filter(a => watchlistIds.includes(a.id));
+
+  const filteredAssets = activeWatchlistAssets.filter(a => {
     const matchesSearch = a.name.toLowerCase().includes(search.toLowerCase()) || a.id.toLowerCase().includes(search.toLowerCase());
     const matchesFilter = filter === 'ALL' || (filter === 'CRYPTO' && a.category === 'Crypto') || (filter === 'STOCKS' && a.category !== 'Crypto');
     return matchesSearch && matchesFilter;
   });
 
   return (
-    <aside className="glass-panel" style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '14px', height: '100%', overflow: 'hidden' }}>
+    <aside className="glass-panel" style={{ padding: '14px', display: 'flex', flexDirection: 'column', gap: '10px', height: '100%', maxHeight: 'calc(100vh - 90px)', overflow: 'hidden' }}>
+      
+      {/* Header & Add Symbol Button */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <Flame size={18} color="#f59e0b" />
-          <h3 style={{ fontSize: '0.95rem', fontWeight: 700, color: '#fff' }}>Market Watch</h3>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <Flame size={16} color="#f59e0b" />
+          <h3 style={{ fontSize: '0.9rem', fontWeight: 700, color: '#fff' }}>Watchlist</h3>
         </div>
-        <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{assetList.length} Assets</span>
+
+        <button 
+          onClick={() => setIsAddModalOpen(true)}
+          className="btn-ghost active"
+          title="Add Symbol (TradingView Search)"
+          style={{ padding: '4px 8px', fontSize: '0.72rem', gap: '4px' }}
+        >
+          <Plus size={14} /> Add Symbol
+        </button>
       </div>
 
       {/* Search Input */}
       <div style={{ position: 'relative' }}>
-        <Search size={14} color="var(--text-muted)" style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)' }} />
+        <Search size={13} color="var(--text-muted)" style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)' }} />
         <input 
           type="text"
-          placeholder="Search TATA, TSLA, BTC..."
+          placeholder="Filter watchlist..."
           value={search}
           onChange={e => setSearch(e.target.value)}
           style={{
             width: '100%',
-            padding: '8px 10px 8px 30px',
+            padding: '6px 8px 6px 28px',
             background: 'rgba(0,0,0,0.3)',
             border: '1px solid var(--border-color)',
-            borderRadius: '8px',
+            borderRadius: '6px',
             color: '#fff',
-            fontSize: '0.8rem',
+            fontSize: '0.75rem',
             outline: 'none'
           }}
         />
       </div>
 
-      {/* Filter Tabs */}
-      <div style={{ display: 'flex', gap: '4px', background: 'rgba(0,0,0,0.3)', padding: '3px', borderRadius: '8px' }}>
+      {/* Category Filter Pills */}
+      <div style={{ display: 'flex', gap: '3px', background: 'rgba(0,0,0,0.3)', padding: '2px', borderRadius: '6px' }}>
         {['ALL', 'CRYPTO', 'STOCKS'].map(cat => (
           <button
             key={cat}
             onClick={() => setFilter(cat)}
             className={`btn-ghost ${filter === cat ? 'active' : ''}`}
-            style={{ flex: 1, padding: '4px 0', fontSize: '0.7rem', textAlign: 'center', justifyContent: 'center' }}
+            style={{ flex: 1, padding: '3px 0', fontSize: '0.68rem', textAlign: 'center', justifyContent: 'center' }}
           >
             {cat}
           </button>
         ))}
       </div>
 
-      {/* Add Custom Symbol Button if search doesn't match */}
-      {search.trim() !== '' && filteredAssets.length === 0 && (
-        <button
-          onClick={handleAddCustomSymbol}
-          className="btn-bullish"
-          style={{ padding: '8px 12px', fontSize: '0.75rem', justifyContent: 'center' }}
-        >
-          <PlusCircle size={14} /> Add "{search.toUpperCase()}" to Watchlist
-        </button>
-      )}
-
-      {/* Asset List */}
-      <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px', paddingRight: '4px' }}>
+      {/* Compact Scrollable List (Fixed Height, No Page Overflow!) */}
+      <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '4px', paddingRight: '2px' }}>
         {filteredAssets.map(asset => {
           const info = assetPrices[asset.id] || { price: asset.basePrice, change: 1.2, isPositive: true };
           const isSelected = selectedAsset.id === asset.id;
-          const currSymbol = currency;
 
           return (
             <div
               key={asset.id}
               onClick={() => onSelectAsset(asset)}
               style={{
-                padding: '10px 12px',
-                borderRadius: '10px',
-                background: isSelected ? 'rgba(99, 102, 241, 0.18)' : 'rgba(255,255,255,0.02)',
+                padding: '8px 10px',
+                borderRadius: '8px',
+                background: isSelected ? 'rgba(99, 102, 241, 0.2)' : 'rgba(255,255,255,0.02)',
                 border: isSelected ? '1px solid var(--accent)' : '1px solid var(--border-color)',
                 cursor: 'pointer',
-                transition: 'all 0.2s ease',
+                transition: 'all 0.15s ease',
                 display: 'flex',
                 alignItems: 'center',
                 justify: 'space-between'
               }}
             >
-              <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <strong style={{ fontSize: '0.85rem', color: isSelected ? '#fff' : 'var(--text-main)' }}>{asset.id}</strong>
-                  <span style={{ fontSize: '0.65rem', padding: '1px 4px', background: 'rgba(255,255,255,0.06)', borderRadius: '3px', color: 'var(--text-muted)' }}>
-                    {asset.category}
-                  </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <strong style={{ fontSize: '0.8rem', color: isSelected ? '#fff' : 'var(--text-main)' }}>{asset.id}</strong>
+                    <span style={{ fontSize: '0.6rem', padding: '1px 4px', background: 'rgba(255,255,255,0.05)', borderRadius: '3px', color: 'var(--text-dim)' }}>
+                      {asset.currency === '₹' ? 'NSE' : asset.category === 'Crypto' ? 'BINANCE' : 'NASDAQ'}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '0.68rem', color: 'var(--text-dim)', maxWidth: '90px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {asset.name}
+                  </div>
                 </div>
-                <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)', marginTop: '2px' }}>{asset.name}</div>
               </div>
 
-              <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
+              <div style={{ textAlign: 'right', display: 'flex', alignItems: 'center', gap: '10px' }}>
                 <MiniSparkline isPositive={info.isPositive} />
-                <div className="font-mono" style={{ fontSize: '0.82rem', fontWeight: 600, color: '#fff' }}>
-                  {formatPrice(info.price, currSymbol, asset.currency)}
-                </div>
-                <div style={{ fontSize: '0.7rem', fontWeight: 600, color: info.isPositive ? 'var(--bullish)' : 'var(--bearish)', display: 'flex', alignItems: 'center', gap: '2px' }}>
-                  {info.isPositive ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
-                  {info.isPositive ? '+' : ''}{info.change}%
+                <div>
+                  <div className="font-mono" style={{ fontSize: '0.78rem', fontWeight: 600, color: '#fff' }}>
+                    {formatPrice(info.price, currency, asset.currency)}
+                  </div>
+                  <div style={{ fontSize: '0.68rem', fontWeight: 600, color: info.isPositive ? 'var(--bullish)' : 'var(--bearish)' }}>
+                    {info.isPositive ? '+' : ''}{info.change}%
+                  </div>
                 </div>
               </div>
             </div>
           );
         })}
       </div>
+
+      {/* TradingView Add Symbol Modal */}
+      <AddSymbolModal 
+        isOpen={isAddModalOpen}
+        onClose={() => setIsAddModalOpen(false)}
+        watchlistIds={watchlistIds}
+        onToggleWatchlistSymbol={handleToggleSymbol}
+      />
+
     </aside>
   );
 }
