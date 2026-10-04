@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Navbar from './components/Navbar';
 import Watchlist from './components/Watchlist';
 import CandleChart from './components/CandleChart';
@@ -11,6 +11,7 @@ import AIAssistantModal from './components/AIAssistantModal';
 import { ASSETS, generateHistoricalCandles, generateNextTick } from './utils/marketData';
 import { analyzeSignals } from './utils/strategyEngine';
 import { sendN8nWebhook } from './utils/n8nWebhook';
+import { fetchRealHistoricalCandles, subscribeRealLiveTicks } from './utils/realMarketFeed';
 import confetti from 'canvas-confetti';
 
 export default function App() {
@@ -19,6 +20,7 @@ export default function App() {
   const [currency, setCurrency] = useState('$');
   const [balance, setBalance] = useState(100000);
   const [isLiveStreaming, setIsLiveStreaming] = useState(true);
+  const [isRealMarket, setIsRealMarket] = useState(true); // Toggle 100% Real Live Exchange Data
 
   // n8n Webhook URL
   const [n8nWebhookUrl, setN8nWebhookUrl] = useState(() => localStorage.getItem('n8n_webhook_url') || '');
@@ -41,11 +43,159 @@ export default function App() {
   const [isRiskCalcOpen, setIsRiskCalcOpen] = useState(false);
   const [isAIOpen, setIsAIOpen] = useState(false);
 
-  // Initialize candles when asset or timeframe changes
+  // Load Real Exchange Candles / Fallback Candles when asset or timeframe changes
   useEffect(() => {
-    const initialCandles = generateHistoricalCandles(selectedAsset.id, 320, timeframe);
-    setCandles(initialCandles);
-  }, [selectedAsset.id, timeframe]);
+    let isMounted = true;
+
+    async function loadCandles() {
+      if (isRealMarket) {
+        const realCandles = await fetchRealHistoricalCandles(selectedAsset.id, timeframe, 320);
+        if (isMounted && realCandles && realCandles.length > 0) {
+          setCandles(realCandles);
+          return;
+        }
+      }
+      // Fallback
+      if (isMounted) {
+        setCandles(generateHistoricalCandles(selectedAsset.id, 320, timeframe));
+      }
+    }
+
+    loadCandles();
+
+    return () => { isMounted = false; };
+  }, [selectedAsset.id, timeframe, isRealMarket]);
+
+  // Connect 100% Real Live Exchange WebSockets for Crypto or High-Freq Simulation for Stocks
+  useEffect(() => {
+    if (!isLiveStreaming) return;
+
+    // 1. Real Binance Exchange WebSocket Connection for Crypto
+    if (isRealMarket && (selectedAsset.category === 'Crypto' || selectedAsset.id.endsWith('USDT'))) {
+      const unsubscribe = subscribeRealLiveTicks(selectedAsset.id, timeframe, (liveCandle) => {
+        setCandles(prevCandles => {
+          if (prevCandles.length === 0) return [liveCandle];
+          const lastIndex = prevCandles.length - 1;
+          const lastCandle = prevCandles[lastIndex];
+
+          let nextCandles;
+          if (liveCandle.time > lastCandle.time) {
+            // New candle opened from Binance
+            nextCandles = [...prevCandles.slice(1), liveCandle];
+          } else {
+            // Update current candle with live tick price
+            nextCandles = [...prevCandles.slice(0, lastIndex), {
+              ...lastCandle,
+              high: Math.max(lastCandle.high, liveCandle.close),
+              low: Math.min(lastCandle.low, liveCandle.close),
+              close: liveCandle.close,
+              volume: liveCandle.volume
+            }];
+          }
+
+          // Monitor open orders against live exchange tick price
+          checkOrderTriggers(liveCandle.close);
+          return nextCandles;
+        });
+      });
+
+      return () => unsubscribe();
+    }
+
+    // 2. High-Frequency Tick Generator for Stocks
+    const timer = setInterval(() => {
+      setCandles(prevCandles => {
+        if (prevCandles.length === 0) return prevCandles;
+        const last = prevCandles[prevCandles.length - 1];
+        const tick = generateNextTick(last, selectedAsset.id, timeframe);
+
+        let nextCandles;
+        if (tick.isNewCandle) {
+          nextCandles = [...prevCandles.slice(1), tick.candle];
+        } else {
+          nextCandles = [...prevCandles.slice(0, prevCandles.length - 1), tick.candle];
+        }
+
+        checkOrderTriggers(tick.candle.close);
+        return nextCandles;
+      });
+    }, 1200);
+
+    return () => clearInterval(timer);
+
+  }, [isLiveStreaming, isRealMarket, selectedAsset.id, timeframe]);
+
+  // Helper to monitor Stop Loss & Take Profit against real ticks
+  const checkOrderTriggers = (currentPrice) => {
+    setPositions(prevPos => {
+      const remainingPos = [];
+      prevPos.forEach(pos => {
+        if (pos.assetId === selectedAsset.id) {
+          let hit = false;
+          let exitReason = '';
+          let exitPrice = currentPrice;
+
+          if (pos.type === 'BUY') {
+            if (currentPrice <= pos.stopLoss) {
+              hit = true;
+              exitReason = 'Stop Loss Hit 🛑';
+              exitPrice = pos.stopLoss;
+            } else if (currentPrice >= pos.takeProfit) {
+              hit = true;
+              exitReason = 'Take Profit Hit 🎯';
+              exitPrice = pos.takeProfit;
+            }
+          } else if (pos.type === 'SELL') {
+            if (currentPrice >= pos.stopLoss) {
+              hit = true;
+              exitReason = 'Stop Loss Hit 🛑';
+              exitPrice = pos.stopLoss;
+            } else if (currentPrice <= pos.takeProfit) {
+              hit = true;
+              exitReason = 'Take Profit Hit 🎯';
+              exitPrice = pos.takeProfit;
+            }
+          }
+
+          if (hit) {
+            const pnlPct = pos.type === 'BUY'
+              ? ((exitPrice - pos.entryPrice) / pos.entryPrice) * 100
+              : ((pos.entryPrice - exitPrice) / pos.entryPrice) * 100;
+            const pnlAmount = (pos.allocatedMargin || 1000) * (pnlPct / 100);
+
+            if (pnlAmount > 0) {
+              confetti({ particleCount: 50, spread: 60, origin: { y: 0.7 } });
+            }
+
+            setBalance(b => b + pnlAmount);
+            const historyItem = {
+              id: `th_${Date.now()}_${Math.random()}`,
+              assetId: pos.assetId,
+              type: pos.type,
+              entryPrice: pos.entryPrice,
+              exitPrice,
+              exitReason,
+              pnlAmount: parseFloat(pnlAmount.toFixed(2)),
+              pnlPct: parseFloat(pnlPct.toFixed(2)),
+              time: Date.now()
+            };
+
+            setTradeHistory(th => [historyItem, ...th]);
+
+            if (n8nWebhookUrl) {
+              sendN8nWebhook(n8nWebhookUrl, 'TRADE_CLOSED', historyItem);
+            }
+
+          } else {
+            remainingPos.push(pos);
+          }
+        } else {
+          remainingPos.push(pos);
+        }
+      });
+      return remainingPos;
+    });
+  };
 
   // Recalculate AI signals whenever candles or strategy settings change
   useEffect(() => {
@@ -54,7 +204,6 @@ export default function App() {
       setActiveSignal(sig);
       setSignalHistory(history);
 
-      // Trigger n8n Webhook for Telegram Alert when a new active signal appears
       if (sig && n8nWebhookUrl) {
         sendN8nWebhook(n8nWebhookUrl, 'SIGNAL_ALERT', {
           asset: selectedAsset.name,
@@ -69,102 +218,6 @@ export default function App() {
       }
     }
   }, [candles, strategyId, customParams]);
-
-  // Real-time Ticks & Order Monitoring Loop
-  useEffect(() => {
-    if (!isLiveStreaming || candles.length === 0) return;
-
-    const timer = setInterval(() => {
-      setCandles(prevCandles => {
-        if (prevCandles.length === 0) return prevCandles;
-        const last = prevCandles[prevCandles.length - 1];
-        const tick = generateNextTick(last, selectedAsset.id, timeframe);
-
-        let nextCandles;
-        if (tick.isNewCandle) {
-          nextCandles = [...prevCandles.slice(1), tick.candle];
-        } else {
-          nextCandles = [...prevCandles.slice(0, prevCandles.length - 1), tick.candle];
-        }
-
-        // Auto-check Stop Loss / Take Profit for open positions on this asset
-        const currentPrice = tick.candle.close;
-        setPositions(prevPos => {
-          const remainingPos = [];
-          prevPos.forEach(pos => {
-            if (pos.assetId === selectedAsset.id) {
-              let hit = false;
-              let exitReason = '';
-              let exitPrice = currentPrice;
-
-              if (pos.type === 'BUY') {
-                if (currentPrice <= pos.stopLoss) {
-                  hit = true;
-                  exitReason = 'Stop Loss Hit 🛑';
-                  exitPrice = pos.stopLoss;
-                } else if (currentPrice >= pos.takeProfit) {
-                  hit = true;
-                  exitReason = 'Take Profit Hit 🎯';
-                  exitPrice = pos.takeProfit;
-                }
-              } else if (pos.type === 'SELL') {
-                if (currentPrice >= pos.stopLoss) {
-                  hit = true;
-                  exitReason = 'Stop Loss Hit 🛑';
-                  exitPrice = pos.stopLoss;
-                } else if (currentPrice <= pos.takeProfit) {
-                  hit = true;
-                  exitReason = 'Take Profit Hit 🎯';
-                  exitPrice = pos.takeProfit;
-                }
-              }
-
-              if (hit) {
-                const pnlPct = pos.type === 'BUY'
-                  ? ((exitPrice - pos.entryPrice) / pos.entryPrice) * 100
-                  : ((pos.entryPrice - exitPrice) / pos.entryPrice) * 100;
-                const pnlAmount = (pos.allocatedMargin || 1000) * (pnlPct / 100);
-
-                if (pnlAmount > 0) {
-                  confetti({ particleCount: 50, spread: 60, origin: { y: 0.7 } });
-                }
-
-                setBalance(b => b + pnlAmount);
-                const historyItem = {
-                  id: `th_${Date.now()}_${Math.random()}`,
-                  assetId: pos.assetId,
-                  type: pos.type,
-                  entryPrice: pos.entryPrice,
-                  exitPrice,
-                  exitReason,
-                  pnlAmount: parseFloat(pnlAmount.toFixed(2)),
-                  pnlPct: parseFloat(pnlPct.toFixed(2)),
-                  time: Date.now()
-                };
-
-                setTradeHistory(th => [historyItem, ...th]);
-
-                // Trigger n8n Webhook for Trello Trading Journal Logging
-                if (n8nWebhookUrl) {
-                  sendN8nWebhook(n8nWebhookUrl, 'TRADE_CLOSED', historyItem);
-                }
-
-              } else {
-                remainingPos.push(pos);
-              }
-            } else {
-              remainingPos.push(pos);
-            }
-          });
-          return remainingPos;
-        });
-
-        return nextCandles;
-      });
-    }, 1200);
-
-    return () => clearInterval(timer);
-  }, [isLiveStreaming, selectedAsset.id, timeframe, candles.length, n8nWebhookUrl]);
 
   // Execute Signal Paper Trade
   const handleExecuteTrade = (signal) => {
